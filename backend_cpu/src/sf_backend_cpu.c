@@ -158,7 +158,7 @@ static void format_tensor_debug(char* buf, const sf_exec_ctx* ctx, int reg_idx, 
 
 static void report_crash(sf_exec_ctx* ctx, const sf_cpu_parallel_batch* batch, u32 inst_idx) {
     const sf_instruction* inst = &batch->program->code[inst_idx];
-    const sf_runtime_op_metadata* meta = sf_get_op_metadata(inst->opcode);
+    const sf_op_metadata* meta = sf_get_op_metadata(inst->opcode);
 
     char coords[128] = {0};
     int pos = 0;
