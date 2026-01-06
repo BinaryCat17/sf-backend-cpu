@@ -212,22 +212,9 @@ static void prepare_registers(sf_backend_cpu_worker_state* state, const sf_cpu_p
         const sf_bin_task_binding* bind = &prog->bindings[task->binding_offset + b];
         u16 i = bind->reg_idx;
         
-        ctx->reg_info[i] = prog->tensor_infos[i];
-        
-        // For dynamic resources (aliased), we must update the info to match the bound resource
         sf_tensor* t = &batch->main_state->registers[i];
-        uint8_t flags = prog->tensor_flags[i];
-        
-        if (flags & SF_TENSOR_FLAG_ALIAS) {
-            ctx->reg_info[i] = t->info;
-        }
-
-        // DYNAMIC STRIDE CALCULATION
-        // The baked bind->byte_stride is only valid if shapes haven't changed.
-        // We recalculate it based on current info and batch total elements.
-        size_t reg_elements = sf_shape_calc_count(ctx->reg_info[i].shape, ctx->reg_info[i].ndim);
-        i32 elem_stride = sf_shape_calc_linear_stride(reg_elements, batch->total_elements);
-        ctx->reg_strides[i] = elem_stride * (i32)sf_dtype_size(ctx->reg_info[i].dtype);
+        ctx->reg_info[i] = t->info;
+        ctx->reg_strides[i] = batch->main_state->task_strides[i];
 
         if (batch->reduction_scratch && (bind->flags & SF_BINDING_FLAG_REDUCTION)) {
             ctx->reg_ptrs[i] = &batch->reduction_scratch[tid * batch->reduction_scratch_per_thread + i];
@@ -241,7 +228,7 @@ static void prepare_registers(sf_backend_cpu_worker_state* state, const sf_cpu_p
         } else {
             ctx->reg_ptrs[i] = NULL;
             if (ctx->error == SF_ERROR_NONE) {
-                SF_LOG_ERROR("Backend: Reg %u (%s) has NULL buffer data (Flags: 0x%X)", i, find_reg_name(prog, i), flags);
+                SF_LOG_ERROR("Backend: Reg %u (%s) has NULL buffer data", i, find_reg_name(prog, i));
                 ctx->error = SF_ERROR_RUNTIME;
             }
         }
@@ -348,12 +335,14 @@ static void sf_backend_cpu_free_baked(void* backend_state, void* baked_data) {
     }
 }
 
-static void sf_backend_cpu_dispatch(void* backend_state, const struct sf_program* program, struct sf_state* main_state, const sf_tensor* domain, uint32_t start_inst, uint32_t inst_count) {
+static void sf_backend_cpu_dispatch(void* backend_state, const struct sf_program* program, struct sf_state* main_state, const sf_tensor* domain, const sf_task* task) {
     sf_backend_cpu_state* state = (sf_backend_cpu_state*)backend_state;
     sf_cpu_baked_kernel* baked = (sf_cpu_baked_kernel*)main_state->baked_data;
-    if (!domain || !baked) return;
+    if (!domain || !baked || !task) return;
+
     size_t total_elements = sf_tensor_count(domain);
     if (total_elements == 0) return;
+
     int num_threads = state->pool ? sf_thread_pool_get_thread_count(state->pool) : 1;
     sf_cpu_parallel_batch batch = {
         .program = program, .main_state = main_state, .op_table = state->op_table,
@@ -362,40 +351,26 @@ static void sf_backend_cpu_dispatch(void* backend_state, const struct sf_program
     };
     memcpy(batch.domain_shape, domain->info.shape, sizeof(u32) * SF_MAX_DIMS);
     
-    // Find the task that matches this instruction range
-    const sf_task* target_task = NULL;
-    for (u32 s = 0; s < program->meta.task_count; ++s) {
-        if (program->tasks[s].start_inst == start_inst) {
-            target_task = &program->tasks[s];
-            break;
-        }
-    }
-
-    if (!target_task) {
-        SF_LOG_ERROR("Backend: Could not find task starting at %u", start_inst);
-        return;
-    }
-
-    if (batch.reduction_scratch && (target_task->strategy == SF_STRATEGY_REDUCTION)) {
+    if (batch.reduction_scratch && (task->strategy == SF_STRATEGY_REDUCTION)) {
         memset(batch.reduction_scratch, 0, baked->reduction_scratch_size * sizeof(f32));
     }
 
-    if (target_task->strategy == SF_STRATEGY_TWO_PASS_SYNC) {
+    if (task->strategy == SF_STRATEGY_TWO_PASS_SYNC) {
         u32 total_jobs = (u32)((batch.total_elements + SF_CPU_JOB_SIZE - 1) / SF_CPU_JOB_SIZE);
         f32* sync_ptr = baked->sync_scratch;
         if (total_jobs > baked->sync_scratch_size) sync_ptr = calloc(total_jobs, sizeof(f32));
         batch.sync_pass = 0; batch.sync_data = sync_ptr;
-        sf_backend_cpu_dispatch_batch(state, &batch, target_task);
+        sf_backend_cpu_dispatch_batch(state, &batch, task);
         f32 global_acc = 0;
         for (u32 j = 0; j < total_jobs; ++j) { f32 chunk_total = sync_ptr[j]; sync_ptr[j] = global_acc; global_acc += chunk_total; }
         batch.sync_pass = 1;
-        sf_backend_cpu_dispatch_batch(state, &batch, target_task);
+        sf_backend_cpu_dispatch_batch(state, &batch, task);
         if (sync_ptr != baked->sync_scratch) free(sync_ptr);
     } else {
-        sf_backend_cpu_dispatch_batch(state, &batch, target_task);
+        sf_backend_cpu_dispatch_batch(state, &batch, task);
     }
 
-    if (batch.reduction_scratch && (target_task->strategy == SF_STRATEGY_REDUCTION)) {
+    if (batch.reduction_scratch && (task->strategy == SF_STRATEGY_REDUCTION)) {
         for (u32 i = 0; i < program->meta.tensor_count; ++i) {
             if (program->tensor_flags[i] & SF_TENSOR_FLAG_REDUCTION) {
                 f32 final_val = 0;
