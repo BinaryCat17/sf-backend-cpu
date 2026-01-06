@@ -50,8 +50,6 @@ typedef struct {
     sf_op_func* op_table;
     
     const sf_task* current_task;
-    uint32_t start_inst;
-    uint32_t inst_count;
     
     size_t total_elements;
     u8 ndim;
@@ -191,7 +189,7 @@ static inline void sf_cpu_exec(sf_exec_ctx* ctx, const sf_cpu_parallel_batch* ba
         if (ctx->error != SF_ERROR_NONE) break;
         if (batch->main_state && sf_atomic_load((sf_atomic_i32*)&batch->main_state->error_code) != 0) break;
 
-        u32 inst_idx = batch->start_inst + i;
+        u32 inst_idx = batch->current_task->start_inst + i;
         const sf_instruction* inst = &batch->program->code[inst_idx];
         
         sf_op_func op = batch->op_table[inst->opcode];
@@ -283,7 +281,7 @@ static void cpu_worker_job(u32 job_idx, void* thread_local_data, void* user_data
     }
     
     prepare_registers(state, batch, start_idx, count);
-    sf_cpu_exec(&state->ctx, batch, batch->inst_count);
+    sf_cpu_exec(&state->ctx, batch, batch->current_task->inst_count);
     
     if (state->ctx.error != SF_ERROR_NONE && batch->main_state) {
         sf_atomic_store(&batch->main_state->error_code, (int32_t)state->ctx.error);
@@ -293,8 +291,6 @@ static void cpu_worker_job(u32 job_idx, void* thread_local_data, void* user_data
 static void sf_backend_cpu_dispatch_batch(sf_backend_cpu_state* state, sf_cpu_parallel_batch* batch, const sf_task* task) {
     if (task->inst_count == 0) return;
     batch->current_task = task;
-    batch->start_inst = task->start_inst;
-    batch->inst_count = task->inst_count;
     u32 total_jobs = (u32)((batch->total_elements + SF_CPU_JOB_SIZE - 1) / SF_CPU_JOB_SIZE);
     if (batch->total_elements <= SF_CPU_INLINE_THRESHOLD || total_jobs == 1) {
         sf_backend_cpu_worker_state local_worker;
