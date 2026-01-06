@@ -267,19 +267,33 @@ static void cpu_worker_job(u32 job_idx, void* thread_local_data, void* user_data
     state->ctx.sync_pass = batch->sync_pass;
     state->ctx.sync_data = batch->sync_data;
 
-    // Coordinate decomposition
-    if (batch->ndim > 1) {
+    // Coordinate decomposition (Optimized Fast Paths)
+    if (batch->ndim == 1) {
+        state->ctx.tile_offset[0] = (u32)start_idx;
+        state->ctx.tile_offset[1] = 0;
+        state->ctx.tile_offset[2] = 0;
+    } else if (batch->ndim == 2) {
+        state->ctx.tile_offset[0] = (u32)(start_idx / batch->domain_shape[1]);
+        state->ctx.tile_offset[1] = (u32)(start_idx % batch->domain_shape[1]);
+        state->ctx.tile_offset[2] = 0;
+    } else if (batch->ndim == 3) {
+        size_t area = (size_t)batch->domain_shape[1] * batch->domain_shape[2];
+        state->ctx.tile_offset[0] = (u32)(start_idx / area);
+        size_t rem = start_idx % area;
+        state->ctx.tile_offset[1] = (u32)(rem / batch->domain_shape[2]);
+        state->ctx.tile_offset[2] = (u32)(rem % batch->domain_shape[2]);
+    } else {
+        // Generic N-D fallback
         size_t temp_idx = start_idx;
         for (int i = batch->ndim - 1; i >= 0; --i) {
             state->ctx.tile_offset[i] = (u32)(temp_idx % batch->domain_shape[i]);
             temp_idx /= batch->domain_shape[i];
         }
-    } else {
-        state->ctx.tile_offset[0] = (u32)start_idx;
-        for (int i = 1; i < SF_MAX_DIMS; ++i) state->ctx.tile_offset[i] = 0;
     }
     
-    for(int d=0; d<batch->ndim; ++d) state->ctx.domain_shape[d] = batch->domain_shape[d];
+    for(int d=0; d<SF_MAX_DIMS; ++d) {
+        state->ctx.domain_shape[d] = (d < batch->ndim) ? batch->domain_shape[d] : 1;
+    }
     
     prepare_registers(state, batch, start_idx, count);
     sf_cpu_exec(&state->ctx, batch, batch->inst_count);

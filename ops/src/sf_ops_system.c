@@ -7,28 +7,32 @@
  */
 
 static void sf_generate_index_chunk(void* out_raw, sf_dtype dtype, u32 count, u32 job_offset, u8 axis, bool is_vector, u8 domain_ndim, const u32* domain_shape) {
-    u32 current_coords[SF_MAX_DIMS];
+    u32 coords[SF_MAX_DIMS] = {0};
+    
+    // Initial decomposition
     u32 temp_idx = job_offset;
     for (int i = (int)domain_ndim - 1; i >= 0; --i) {
-        current_coords[i] = temp_idx % domain_shape[i];
+        coords[i] = temp_idx % domain_shape[i];
         temp_idx /= domain_shape[i];
     }
+
     for (u32 e = 0; e < count; ++e) {
         if (is_vector) {
             for (u32 d = 0; d < domain_ndim; ++d) {
-                float val = (f32)current_coords[d];
+                float val = (f32)coords[d];
                 if (dtype == SF_DTYPE_F32) ((f32*)out_raw)[e * domain_ndim + d] = val;
-                else if (dtype == SF_DTYPE_I32) ((i32*)out_raw)[e * domain_ndim + d] = (i32)current_coords[d];
+                else if (dtype == SF_DTYPE_I32) ((i32*)out_raw)[e * domain_ndim + d] = (i32)coords[d];
             }
         } else {
-            float val = (axis < domain_ndim) ? (f32)current_coords[axis] : 0.0f;
+            float val = (axis < domain_ndim) ? (f32)coords[axis] : 0.0f;
             if (dtype == SF_DTYPE_F32) ((f32*)out_raw)[e] = val;
-            else if (dtype == SF_DTYPE_I32) ((i32*)out_raw)[e] = (axis < domain_ndim) ? (i32)current_coords[axis] : 0;
+            else if (dtype == SF_DTYPE_I32) ((i32*)out_raw)[e] = (axis < domain_ndim) ? (i32)coords[axis] : 0;
         }
+
+        // Increment coordinates
         for (int d = (int)domain_ndim - 1; d >= 0; --d) {
-            current_coords[d]++;
-            if (current_coords[d] < domain_shape[d] || d == 0) break;
-            current_coords[d] = 0;
+            if (++coords[d] < domain_shape[d]) break;
+            coords[d] = 0;
         }
     }
 }
