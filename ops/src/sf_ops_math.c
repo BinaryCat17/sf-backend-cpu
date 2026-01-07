@@ -144,6 +144,22 @@ void op_SUM(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     *d_ptr = sum;
 }
 
+void op_SUM_STABLE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
+    size_t sz = ctx->batch_size;
+    
+    f64 sum = 0; // Use double for precision
+    u8* s_ptr = (u8*)ctx->reg_ptrs[inst->src1_idx];
+    i32 st1 = SF_GET_STRIDE_S1(inst);
+
+    for (size_t i = 0; i < sz; ++i) {
+        sum += (f64)(*(f32*)s_ptr);
+        s_ptr += st1;
+    }
+    
+    f32* d_ptr = (f32*)ctx->reg_ptrs[inst->dest_idx];
+    *d_ptr = (f32)sum;
+}
+
 void op_SIZE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     const sf_type_info* src_info = &ctx->reg_info[inst->src1_idx];
     size_t count = 1;

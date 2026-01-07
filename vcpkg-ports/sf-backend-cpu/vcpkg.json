@@ -1,0 +1,16 @@
+{
+  "name": "sf-backend-cpu",
+  "version": "0.1.0",
+  "description": "CPU Backend for SionFlow",
+  "dependencies": [
+    "sf-spec",
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    }
+  ]
+}
