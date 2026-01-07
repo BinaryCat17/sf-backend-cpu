@@ -51,3 +51,8 @@ void op_INDEX_Z(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     u16 r_out = inst->dest_idx;
     sf_generate_index_chunk(ctx->reg_ptrs[r_out], ctx->reg_info[r_out].dtype, ctx->batch_size, ctx->linear_offset, 2, false, ctx->ndim, ctx->domain_shape);
 }
+
+void op_RANGE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
+    u16 r_out = inst->dest_idx;
+    sf_generate_index_chunk(ctx->reg_ptrs[r_out], ctx->reg_info[r_out].dtype, ctx->batch_size, ctx->linear_offset, 0, false, ctx->ndim, ctx->domain_shape);
+}
