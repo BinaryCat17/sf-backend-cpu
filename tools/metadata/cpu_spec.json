@@ -30,6 +30,9 @@
     "AND": { "expression": "(va && vb)" },
     "OR": { "expression": "(va || vb)" },
     "XOR": { "expression": "((int)va != (int)vb)" },
-    "NOT": { "expression": "(!va)" }
+    "NOT": { "expression": "(!va)" },
+    "DOT": { "template": "sf_dot(va, vb, s1_last_dim)" },
+    "LENGTH": { "template": "sf_length(va, s1_last_dim)" },
+    "NORMALIZE": { "template": "sf_normalize(va, s1_last_dim)" }
   }
 }

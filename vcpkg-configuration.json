@@ -1,0 +1,28 @@
+{
+  "default-registry": {
+    "kind": "builtin",
+    "baseline": "594ad8871e1e8e45f8e626c015fd611163430207"
+  },
+  "registries": [
+    {
+      "kind": "filesystem",
+      "path": "../sf-spec/vcpkg-ports",
+      "packages": [ "sf-spec" ]
+    },
+    {
+      "kind": "filesystem",
+      "path": "../sf-compiler/vcpkg-ports",
+      "packages": [ "sf-compiler" ]
+    },
+    {
+      "kind": "filesystem",
+      "path": "../sf-runtime/vcpkg-ports",
+      "packages": [ "sf-runtime" ]
+    },
+    {
+      "kind": "filesystem",
+      "path": "vcpkg-ports",
+      "packages": [ "sf-backend-cpu" ]
+    }
+  ]
+}

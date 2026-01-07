@@ -1,19 +1,21 @@
 # --- Kernel Generation ---
 find_package(Python3 REQUIRED)
-set(ISA_GEN_PY "${CMAKE_CURRENT_SOURCE_DIR}/../../sf-spec/tools/isa_gen.py")
-set(ISA_JSON "${CMAKE_CURRENT_SOURCE_DIR}/../../sf-spec/tools/metadata/isa.json")
+
+set(SF_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${SF_GEN_DIR}")
+
 set(CPU_SPEC "${CMAKE_CURRENT_SOURCE_DIR}/../tools/metadata/cpu_spec.json")
 set(KERNELS_TMPL "${CMAKE_CURRENT_SOURCE_DIR}/../tools/templates/sf_ops_cpu_auto.c.j2")
-set(KERNELS_C "${CMAKE_CURRENT_SOURCE_DIR}/../tools/generated/sf_ops_auto.c")
+set(KERNELS_C "${SF_GEN_DIR}/sf_ops_auto.c")
 set(DISPATCH_TMPL "${CMAKE_CURRENT_SOURCE_DIR}/../tools/templates/sf_ops_auto_dispatch.c.j2")
-set(DISPATCH_C "${CMAKE_CURRENT_SOURCE_DIR}/../tools/generated/sf_ops_core.c")
+set(DISPATCH_C "${SF_GEN_DIR}/sf_ops_core.c")
 
 add_custom_command(
     OUTPUT "${KERNELS_C}" "${DISPATCH_C}"
-    COMMAND Python3::Interpreter "${ISA_GEN_PY}" --isa "${ISA_JSON}" --backend "${CPU_SPEC}"
+    COMMAND Python3::Interpreter "${SF_ISA_GEN_SCRIPT}" --isa "${SF_ISA_METADATA}" --backend "${CPU_SPEC}"
             --render "${KERNELS_TMPL}:${KERNELS_C}"
                      "${DISPATCH_TMPL}:${DISPATCH_C}"
-    DEPENDS "${ISA_JSON}" "${CPU_SPEC}" "${ISA_GEN_PY}" "${KERNELS_TMPL}" "${DISPATCH_TMPL}"
+    DEPENDS "${SF_ISA_METADATA}" "${CPU_SPEC}" "${SF_ISA_GEN_SCRIPT}" "${KERNELS_TMPL}" "${DISPATCH_TMPL}"
     COMMENT "Generating CPU Kernels and Dispatch Table"
     VERBATIM
 )

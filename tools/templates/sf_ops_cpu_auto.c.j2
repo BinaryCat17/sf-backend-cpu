@@ -6,6 +6,8 @@
 #include "sf_ops_internal.h"
 #include <math.h>
 
+{% import "sf_macros.c.j2" as dsl %}
+
 /**
  * SionFlow CPU Kernels (Auto-generated)
  * Automatically generated from isa.json and cpu_spec.json. DO NOT EDIT.
@@ -13,7 +15,7 @@
 
 {% for node_id, impl in implementations.items() %}
 {% set node = nodes_by_id[node_id] %}
-{% if node and impl.expression %}
+{% if node and (impl.expression or impl.template) %}
 void op_{{ node.opcode }}(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     const size_t sz = ctx->batch_size;
     u8* d_ptr = (u8*)ctx->reg_ptrs[inst->dest_idx];
@@ -27,7 +29,25 @@ void op_{{ node.opcode }}(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     {% if node.inputs|length >= 2 %}const i32 st2 = ctx->reg_strides[inst->src2_idx][ctx->ndim-1];{% endif %}
     {% if node.inputs|length >= 3 %}const i32 st3 = ctx->reg_strides[inst->src3_idx][ctx->ndim-1];{% endif %}
     {% if node.inputs|length >= 4 %}const i32 st4 = ctx->reg_strides[inst->src4_idx][ctx->ndim-1];{% endif %}
-    
+
+    // Dimension Helpers
+    const int32_t s1_last_dim = (ctx->reg_info[inst->src1_idx].ndim > 0) ? ctx->reg_info[inst->src1_idx].shape[ctx->reg_info[inst->src1_idx].ndim - 1] : 1;
+    (void)s1_last_dim;
+
+    {% if impl.template %}
+        {% if 'sf_dot' in impl.template %}
+            {% set expr = dsl.sf_dot('va', 'vb', 's1_last_dim') %}
+        {% elif 'sf_length' in impl.template %}
+            {% set expr = dsl.sf_length('va', 's1_last_dim') %}
+        {% elif 'sf_normalize' in impl.template %}
+            {% set expr = dsl.sf_normalize('va', 's1_last_dim') %}
+        {% else %}
+            {% set expr = impl.template %}
+        {% endif %}
+    {% else %}
+        {% set expr = impl.expression %}
+    {% endif %}
+
     // Fast Path: All strides are standard (sizeof(f32))
     if (st0 == 4 && st1 == 4 {% if node.inputs|length >= 2 %}&& st2 == 4{% endif %} {% if node.inputs|length >= 3 %}&& st3 == 4{% endif %} {% if node.inputs|length >= 4 %}&& st4 == 4{% endif %}) {
         f32* d = (f32*)d_ptr;
@@ -40,7 +60,15 @@ void op_{{ node.opcode }}(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
             {% if node.inputs|length >= 2 %}const f32 vb = b[i];{% endif %}
             {% if node.inputs|length >= 3 %}const f32 vc = c[i];{% endif %}
             {% if node.inputs|length >= 4 %}const f32 vd = din[i];{% endif %}
-            const f32 result = (f32)({{ impl.expression }});
+            
+            // Pointers for DSL macros
+            const void* va_ptr = &a[i];
+            {% if node.inputs|length >= 2 %}const void* vb_ptr = &b[i];{% endif %}
+            {% if node.inputs|length >= 3 %}const void* vc_ptr = &c[i];{% endif %}
+            {% if node.inputs|length >= 4 %}const void* vd_ptr = &din[i];{% endif %}
+            (void)va_ptr; {% if node.inputs|length >= 2 %}(void)vb_ptr;{% endif %} {% if node.inputs|length >= 3 %}(void)vc_ptr;{% endif %} {% if node.inputs|length >= 4 %}(void)vd_ptr;{% endif %}
+
+            const f32 result = (f32)({{ expr }});
             d[i] = isfinite(result) ? result : 0.0f;
         }
         return;
@@ -52,7 +80,14 @@ void op_{{ node.opcode }}(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
         {% if node.inputs|length >= 3 %}const f32 vc = *(f32*)c_ptr;{% endif %}
         {% if node.inputs|length >= 4 %}const f32 vd = *(f32*)d_in_ptr;{% endif %}
         
-        const f32 result = (f32)({{ impl.expression }});
+        // Pointers for DSL macros
+        const void* va_ptr = a_ptr;
+        {% if node.inputs|length >= 2 %}const void* vb_ptr = b_ptr;{% endif %}
+        {% if node.inputs|length >= 3 %}const void* vc_ptr = c_ptr;{% endif %}
+        {% if node.inputs|length >= 4 %}const void* vd_ptr = d_in_ptr;{% endif %}
+        (void)va_ptr; {% if node.inputs|length >= 2 %}(void)vb_ptr;{% endif %} {% if node.inputs|length >= 3 %}(void)vc_ptr;{% endif %} {% if node.inputs|length >= 4 %}(void)vd_ptr;{% endif %}
+
+        const f32 result = (f32)({{ expr }});
         *(f32*)d_ptr = isfinite(result) ? result : 0.0f;
         
         a_ptr += st1;

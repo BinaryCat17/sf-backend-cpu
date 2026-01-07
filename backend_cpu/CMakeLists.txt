@@ -6,9 +6,11 @@ add_library(SionFlow::backend_cpu ALIAS backend_cpu)
 target_include_directories(backend_cpu 
     PUBLIC 
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-    PRIVATE src
+    PRIVATE 
+        src
 )
+
+target_link_libraries(backend_cpu PUBLIC SionFlow::isa SionFlow::base)
 
 target_link_libraries(backend_cpu 
     PUBLIC 

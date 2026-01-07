@@ -1,0 +1,41 @@
+{% macro sf_dot(va, vb, len) -%}
+({
+    float dot_acc = 0.0f;
+    const f32* vec_a = (const f32*)({{ va }}_ptr);
+    const f32* vec_b = (const f32*)({{ vb }}_ptr);
+    for (int k = 0; k < (int)({{ len }}); ++k) {
+        dot_acc += vec_a[k] * vec_b[k];
+    }
+    dot_acc;
+})
+{%- endmacro %}
+
+{% macro sf_length(va, len) -%}
+({
+    float sq_acc = 0.0f;
+    const f32* vec_a = (const f32*)({{ va }}_ptr);
+    for (int k = 0; k < (int)({{ len }}); ++k) {
+        float val = vec_a[k];
+        sq_acc += val * val;
+    }
+    sqrtf(sq_acc);
+})
+{%- endmacro %}
+
+{% macro sf_normalize(va, len) -%}
+({
+    float sq_acc = 0.0f;
+    const f32* vec_a = (const f32*)({{ va }}_ptr);
+    f32* vec_d = (f32*)(d_ptr);
+    for (int k = 0; k < (int)({{ len }}); ++k) {
+        float val = vec_a[k];
+        sq_acc += val * val;
+    }
+    float len_val = sqrtf(sq_acc);
+    float inv_len = (len_val > 1e-6f) ? (1.0f / len_val) : 0.0f;
+    for (int k = 0; k < (int)({{ len }}); ++k) {
+        vec_d[k] = vec_a[k] * inv_len;
+    }
+    *(f32*)d_ptr; // Return first element as dummy, though it's already written
+})
+{%- endmacro %}
