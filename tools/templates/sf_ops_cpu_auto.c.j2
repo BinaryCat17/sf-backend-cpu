@@ -22,12 +22,30 @@ void op_{{ node.opcode }}(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     {% if node.inputs|length >= 3 %}u8* c_ptr = (u8*)ctx->reg_ptrs[inst->src3_idx];{% endif %}
     {% if node.inputs|length >= 4 %}u8* d_in_ptr = (u8*)ctx->reg_ptrs[inst->src4_idx];{% endif %}
     
-    const i32 st0 = ctx->reg_strides[inst->dest_idx];
-    const i32 st1 = ctx->reg_strides[inst->src1_idx];
-    {% if node.inputs|length >= 2 %}const i32 st2 = ctx->reg_strides[inst->src2_idx];{% endif %}
-    {% if node.inputs|length >= 3 %}const i32 st3 = ctx->reg_strides[inst->src3_idx];{% endif %}
-    {% if node.inputs|length >= 4 %}const i32 st4 = ctx->reg_strides[inst->src4_idx];{% endif %}
+    const i32 st0 = ctx->reg_strides[inst->dest_idx][ctx->ndim-1];
+    const i32 st1 = ctx->reg_strides[inst->src1_idx][ctx->ndim-1];
+    {% if node.inputs|length >= 2 %}const i32 st2 = ctx->reg_strides[inst->src2_idx][ctx->ndim-1];{% endif %}
+    {% if node.inputs|length >= 3 %}const i32 st3 = ctx->reg_strides[inst->src3_idx][ctx->ndim-1];{% endif %}
+    {% if node.inputs|length >= 4 %}const i32 st4 = ctx->reg_strides[inst->src4_idx][ctx->ndim-1];{% endif %}
     
+    // Fast Path: All strides are standard (sizeof(f32))
+    if (st0 == 4 && st1 == 4 {% if node.inputs|length >= 2 %}&& st2 == 4{% endif %} {% if node.inputs|length >= 3 %}&& st3 == 4{% endif %} {% if node.inputs|length >= 4 %}&& st4 == 4{% endif %}) {
+        f32* d = (f32*)d_ptr;
+        f32* a = (f32*)a_ptr;
+        {% if node.inputs|length >= 2 %}f32* b = (f32*)b_ptr;{% endif %}
+        {% if node.inputs|length >= 3 %}f32* c = (f32*)c_ptr;{% endif %}
+        {% if node.inputs|length >= 4 %}f32* din = (f32*)d_in_ptr;{% endif %}
+        for(size_t i=0; i<sz; ++i) {
+            const f32 va = a[i];
+            {% if node.inputs|length >= 2 %}const f32 vb = b[i];{% endif %}
+            {% if node.inputs|length >= 3 %}const f32 vc = c[i];{% endif %}
+            {% if node.inputs|length >= 4 %}const f32 vd = din[i];{% endif %}
+            const f32 result = (f32)({{ impl.expression }});
+            d[i] = isfinite(result) ? result : 0.0f;
+        }
+        return;
+    }
+
     for(size_t i=0; i<sz; ++i) {
         const f32 va = *(f32*)a_ptr;
         {% if node.inputs|length >= 2 %}const f32 vb = *(f32*)b_ptr;{% endif %}

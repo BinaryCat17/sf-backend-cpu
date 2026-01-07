@@ -128,7 +128,6 @@ void op_SMOOTHSTEP(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
 // --- Reduction ---
 
 void op_SUM(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
-    const sf_type_info* src_info = &ctx->reg_info[inst->src1_idx];
     size_t sz = ctx->batch_size;
     
     f32 sum = 0;
@@ -141,7 +140,7 @@ void op_SUM(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     }
     
     f32* d_ptr = (f32*)ctx->reg_ptrs[inst->dest_idx];
-    *d_ptr = sum;
+    *d_ptr += sum; // Accumulate partial sum
 }
 
 void op_SUM_STABLE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
@@ -157,7 +156,7 @@ void op_SUM_STABLE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     }
     
     f32* d_ptr = (f32*)ctx->reg_ptrs[inst->dest_idx];
-    *d_ptr = (f32)sum;
+    *d_ptr += (f32)sum; // Accumulate partial sum
 }
 
 void op_SIZE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {

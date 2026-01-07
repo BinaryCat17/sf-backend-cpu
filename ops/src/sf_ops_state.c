@@ -16,6 +16,11 @@ void op_COPY(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     i32 st0 = SF_GET_STRIDE_D(inst);
     i32 st1 = SF_GET_STRIDE_S1(inst);
 
+    if (st0 == (i32)esize && st1 == (i32)esize) {
+        memcpy(d_ptr, s_ptr, sz * esize);
+        return;
+    }
+
     for(size_t i=0; i<sz; ++i) {
         memcpy(d_ptr, s_ptr, esize);
         s_ptr += st1;

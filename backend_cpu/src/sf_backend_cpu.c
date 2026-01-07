@@ -14,8 +14,6 @@
 
 // --- Constants ---
 
-#define SF_CPU_JOB_SIZE         4096         // Elements per job (Linear)
-#define SF_CPU_INLINE_THRESHOLD 1024         // If total elements < this, run inline
 #define SF_CPU_WORKER_HEAP_SZ   (64*1024*1024) // 64MB per worker
 
 // --- Internal Structures ---
@@ -50,10 +48,6 @@ typedef struct {
     sf_op_func* op_table;
     
     const sf_task* current_task;
-    
-    size_t total_elements;
-    u8 ndim;
-    u32 domain_shape[SF_MAX_DIMS];
     
     // Parallel Sync Support
     int sync_pass;
@@ -200,7 +194,7 @@ static inline void sf_cpu_exec(sf_exec_ctx* ctx, const sf_cpu_parallel_batch* ba
     }
 }
 
-static void prepare_registers(sf_backend_cpu_worker_state* state, const sf_cpu_parallel_batch* batch, size_t start_idx, size_t count) {
+static void prepare_registers(sf_backend_cpu_worker_state* state, const sf_cpu_parallel_batch* batch) {
     sf_exec_ctx* ctx = &state->ctx;
     int tid = state->thread_idx;
     const sf_task* task = batch->current_task;
@@ -212,17 +206,24 @@ static void prepare_registers(sf_backend_cpu_worker_state* state, const sf_cpu_p
         
         sf_tensor* t = &batch->main_state->registers[i];
         ctx->reg_info[i] = t->info;
-        ctx->reg_strides[i] = batch->main_state->task_strides[i];
+        
+        // Copy N-D Strides
+        memcpy(ctx->reg_strides[i], &batch->main_state->task_strides[i * SF_MAX_DIMS], sizeof(int32_t) * SF_MAX_DIMS);
 
         if (batch->reduction_scratch && (bind->flags & SF_BINDING_FLAG_REDUCTION)) {
             ctx->reg_ptrs[i] = &batch->reduction_scratch[tid * batch->reduction_scratch_per_thread + i];
-            ctx->reg_strides[i] = 0;
+            memset(ctx->reg_strides[i], 0, sizeof(int32_t) * SF_MAX_DIMS);
             continue;
         }
 
         // Buffer-based (Symbol, Constant, or Scratch)
         if (t->buffer && t->buffer->data) {
-            ctx->reg_ptrs[i] = (u8*)t->buffer->data + t->byte_offset + (start_idx * ctx->reg_strides[i]);
+            u8* ptr = (u8*)t->buffer->data + t->byte_offset;
+            // Apply N-D tile offset
+            for (int d = 0; d < ctx->ndim; ++d) {
+                ptr += (size_t)ctx->tile_offset[d] * ctx->reg_strides[i][d];
+            }
+            ctx->reg_ptrs[i] = ptr;
         } else {
             ctx->reg_ptrs[i] = NULL;
             if (ctx->error == SF_ERROR_NONE) {
@@ -236,51 +237,45 @@ static void prepare_registers(sf_backend_cpu_worker_state* state, const sf_cpu_p
 static void cpu_worker_job(u32 job_idx, void* thread_local_data, void* user_data) {
     sf_backend_cpu_worker_state* state = (sf_backend_cpu_worker_state*)thread_local_data;
     sf_cpu_parallel_batch* batch = (sf_cpu_parallel_batch*)user_data;
-    size_t start_idx = (size_t)job_idx * SF_CPU_JOB_SIZE;
-    size_t count = SF_CPU_JOB_SIZE;
-    if (start_idx + count > batch->total_elements) count = batch->total_elements - start_idx;
-    if (count == 0) return;
     
+    const sf_grid* grid = &batch->main_state->grid;
+    if (job_idx >= grid->total_tiles) return;
+
     sf_arena_reset(&state->temp_arena);
     sf_exec_ctx_init(&state->ctx, (sf_allocator*)&state->temp_arena);
     
-    state->ctx.batch_size = (u32)count;
-    state->ctx.ndim = batch->ndim; 
+    state->ctx.ndim = (u8)batch->main_state->registers[batch->current_task->domain_reg].info.ndim; 
+    state->ctx.grid = *grid;
     if (batch->main_state) state->ctx.global_error_ptr = batch->main_state->global_error_ptr ? batch->main_state->global_error_ptr : &batch->main_state->error_code;
-    state->ctx.linear_offset = (u32)start_idx;
     state->ctx.job_idx = job_idx;
     state->ctx.sync_pass = batch->sync_pass;
     state->ctx.sync_data = batch->sync_data;
 
-    // Coordinate decomposition (Optimized Fast Paths)
-    if (batch->ndim == 1) {
-        state->ctx.tile_offset[0] = (u32)start_idx;
-        state->ctx.tile_offset[1] = 0;
-        state->ctx.tile_offset[2] = 0;
-    } else if (batch->ndim == 2) {
-        state->ctx.tile_offset[0] = (u32)(start_idx / batch->domain_shape[1]);
-        state->ctx.tile_offset[1] = (u32)(start_idx % batch->domain_shape[1]);
-        state->ctx.tile_offset[2] = 0;
-    } else if (batch->ndim == 3) {
-        size_t area = (size_t)batch->domain_shape[1] * batch->domain_shape[2];
-        state->ctx.tile_offset[0] = (u32)(start_idx / area);
-        size_t rem = start_idx % area;
-        state->ctx.tile_offset[1] = (u32)(rem / batch->domain_shape[2]);
-        state->ctx.tile_offset[2] = (u32)(rem % batch->domain_shape[2]);
-    } else {
-        // Generic N-D fallback
-        size_t temp_idx = start_idx;
-        for (int i = batch->ndim - 1; i >= 0; --i) {
-            state->ctx.tile_offset[i] = (u32)(temp_idx % batch->domain_shape[i]);
-            temp_idx /= batch->domain_shape[i];
-        }
+    // Coordinate decomposition from grid
+    u32 temp_idx = job_idx;
+    for (int i = (int)state->ctx.ndim - 2; i >= 0; --i) {
+        state->ctx.tile_offset[i] = temp_idx % grid->dims[i];
+        temp_idx /= grid->dims[i];
     }
+    state->ctx.tile_offset[state->ctx.ndim - 1] = 0; // We always start at col 0 of the row
     
     for(int d=0; d<SF_MAX_DIMS; ++d) {
-        state->ctx.domain_shape[d] = (d < batch->ndim) ? batch->domain_shape[d] : 1;
+        state->ctx.domain_shape[d] = (d < state->ctx.ndim) ? batch->main_state->registers[batch->current_task->domain_reg].info.shape[d] : 1;
+        state->ctx.tile_size[d] = (d < state->ctx.ndim) ? grid->tile_shape[d] : 1;
     }
     
-    prepare_registers(state, batch, start_idx, count);
+    state->ctx.batch_size = state->ctx.tile_size[state->ctx.ndim - 1];
+    
+    // Calculate global linear offset from tile_offset
+    u32 global_linear = 0;
+    u32 current_stride = 1;
+    for (int d = (int)state->ctx.ndim - 1; d >= 0; --d) {
+        global_linear += state->ctx.tile_offset[d] * current_stride;
+        current_stride *= state->ctx.domain_shape[d];
+    }
+    state->ctx.linear_offset = global_linear;
+    
+    prepare_registers(state, batch);
     sf_cpu_exec(&state->ctx, batch, batch->current_task->inst_count);
     
     if (state->ctx.error != SF_ERROR_NONE && batch->main_state) {
@@ -291,11 +286,13 @@ static void cpu_worker_job(u32 job_idx, void* thread_local_data, void* user_data
 static void sf_backend_cpu_dispatch_batch(sf_backend_cpu_state* state, sf_cpu_parallel_batch* batch, const sf_task* task) {
     if (task->inst_count == 0) return;
     batch->current_task = task;
-    u32 total_jobs = (u32)((batch->total_elements + SF_CPU_JOB_SIZE - 1) / SF_CPU_JOB_SIZE);
-    if (batch->total_elements <= SF_CPU_INLINE_THRESHOLD || total_jobs == 1) {
+    u32 total_jobs = batch->main_state->grid.total_tiles;
+    
+    if (total_jobs == 1) {
         sf_backend_cpu_worker_state local_worker;
         _Alignas(16) u8 local_heap[SF_MB(4)]; 
-        local_worker.thread_idx = 0; local_worker.heap_mem = local_heap; local_worker.heap_size = sizeof(local_heap);
+        local_worker.thread_idx = 0; local_worker.heap_mem = local_heap; 
+        local_worker.heap_size = sizeof(local_heap);
         sf_arena_init(&local_worker.temp_arena, local_worker.heap_mem, local_worker.heap_size);
         cpu_worker_job(0, &local_worker, batch);
     } else if (state->pool) sf_thread_pool_run(state->pool, total_jobs, cpu_worker_job, batch);
@@ -336,23 +333,22 @@ static void sf_backend_cpu_dispatch(void* backend_state, const struct sf_program
     sf_cpu_baked_kernel* baked = (sf_cpu_baked_kernel*)main_state->baked_data;
     if (!domain || !baked || !task) return;
 
-    size_t total_elements = sf_tensor_count(domain);
-    if (total_elements == 0) return;
-
     int num_threads = state->pool ? sf_thread_pool_get_thread_count(state->pool) : 1;
     sf_cpu_parallel_batch batch = {
-        .program = program, .main_state = main_state, .op_table = state->op_table,
-        .total_elements = total_elements, .ndim = domain->info.ndim, .num_threads = num_threads,
-        .reduction_scratch = baked->reduction_scratch, .reduction_scratch_per_thread = program->meta.reduction_scratch_size
+        .program = program, 
+        .main_state = main_state, 
+        .op_table = state->op_table,
+        .num_threads = num_threads,
+        .reduction_scratch = baked->reduction_scratch, 
+        .reduction_scratch_per_thread = program->meta.reduction_scratch_size
     };
-    memcpy(batch.domain_shape, domain->info.shape, sizeof(u32) * SF_MAX_DIMS);
     
     if (batch.reduction_scratch && (task->strategy == SF_STRATEGY_REDUCTION)) {
         memset(batch.reduction_scratch, 0, baked->reduction_scratch_size * sizeof(f32));
     }
 
     if (task->strategy == SF_STRATEGY_TWO_PASS_SYNC) {
-        u32 total_jobs = (u32)((batch.total_elements + SF_CPU_JOB_SIZE - 1) / SF_CPU_JOB_SIZE);
+        u32 total_jobs = main_state->grid.total_tiles;
         f32* sync_ptr = baked->sync_scratch;
         if (total_jobs > baked->sync_scratch_size) sync_ptr = calloc(total_jobs, sizeof(f32));
         batch.sync_pass = 0; batch.sync_data = sync_ptr;
@@ -380,6 +376,11 @@ static void sf_backend_cpu_dispatch(void* backend_state, const struct sf_program
     }
 }
 
+static void sf_backend_cpu_barrier(void* backend_state) {
+    (void)backend_state;
+    // On CPU, thread pool synchronization ensures memory visibility.
+}
+
 static void sf_backend_cpu_shutdown(void* backend_state) {
     sf_backend_cpu_state* state = (sf_backend_cpu_state*)backend_state;
     if (!state) return;
@@ -393,7 +394,10 @@ void sf_backend_cpu_init(sf_backend* backend, int num_threads) {
     sf_thread_pool_desc pool_desc = { .num_threads = num_threads, .init_fn = worker_init, .cleanup_fn = worker_cleanup };
     state->pool = sf_thread_pool_create(&pool_desc);
     sf_ops_fill_table(state->op_table);
-    backend->state = state; backend->bake = sf_backend_cpu_bake;
-    backend->free_baked = sf_backend_cpu_free_baked; backend->shutdown = sf_backend_cpu_shutdown;
+    backend->state = state; 
+    backend->bake = sf_backend_cpu_bake;
+    backend->free_baked = sf_backend_cpu_free_baked; 
+    backend->shutdown = sf_backend_cpu_shutdown;
     backend->dispatch = sf_backend_cpu_dispatch;
+    backend->barrier = sf_backend_cpu_barrier;
 }
