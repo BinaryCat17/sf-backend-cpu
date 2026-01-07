@@ -20,22 +20,27 @@ void op_{{ node.opcode }}(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     u8* a_ptr = (u8*)ctx->reg_ptrs[inst->src1_idx];
     {% if node.inputs|length >= 2 %}u8* b_ptr = (u8*)ctx->reg_ptrs[inst->src2_idx];{% endif %}
     {% if node.inputs|length >= 3 %}u8* c_ptr = (u8*)ctx->reg_ptrs[inst->src3_idx];{% endif %}
+    {% if node.inputs|length >= 4 %}u8* d_in_ptr = (u8*)ctx->reg_ptrs[inst->src4_idx];{% endif %}
     
-    const i32 st0 = SF_GET_STRIDE_D(inst);
-    const i32 st1 = SF_GET_STRIDE_S1(inst);
-    {% if node.inputs|length >= 2 %}const i32 st2 = SF_GET_STRIDE_S2(inst);{% endif %}
-    {% if node.inputs|length >= 3 %}const i32 st3 = SF_GET_STRIDE_S3(inst);{% endif %}
+    const i32 st0 = ctx->reg_strides[inst->dest_idx];
+    const i32 st1 = ctx->reg_strides[inst->src1_idx];
+    {% if node.inputs|length >= 2 %}const i32 st2 = ctx->reg_strides[inst->src2_idx];{% endif %}
+    {% if node.inputs|length >= 3 %}const i32 st3 = ctx->reg_strides[inst->src3_idx];{% endif %}
+    {% if node.inputs|length >= 4 %}const i32 st4 = ctx->reg_strides[inst->src4_idx];{% endif %}
     
     for(size_t i=0; i<sz; ++i) {
         const f32 va = *(f32*)a_ptr;
         {% if node.inputs|length >= 2 %}const f32 vb = *(f32*)b_ptr;{% endif %}
         {% if node.inputs|length >= 3 %}const f32 vc = *(f32*)c_ptr;{% endif %}
+        {% if node.inputs|length >= 4 %}const f32 vd = *(f32*)d_in_ptr;{% endif %}
         
-        *(f32*)d_ptr = SF_SAFE_F32({{ impl.expression }});
+        const f32 result = (f32)({{ impl.expression }});
+        *(f32*)d_ptr = isfinite(result) ? result : 0.0f;
         
         a_ptr += st1;
         {% if node.inputs|length >= 2 %}b_ptr += st2;{% endif %}
         {% if node.inputs|length >= 3 %}c_ptr += st3;{% endif %}
+        {% if node.inputs|length >= 4 %}d_in_ptr += st4;{% endif %}
         d_ptr += st0;
     }
 }
