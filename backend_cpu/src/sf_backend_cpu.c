@@ -264,7 +264,7 @@ static void cpu_worker_job(u32 job_idx, void* thread_local_data, void* user_data
         state->ctx.tile_size[d] = (d < state->ctx.ndim) ? grid->tile_shape[d] : 1;
     }
     
-    state->ctx.batch_size = state->ctx.tile_size[state->ctx.ndim - 1];
+    state->ctx.batch_size = (state->ctx.ndim > 0) ? state->ctx.tile_size[state->ctx.ndim - 1] : 1;
     
     // Calculate global linear offset from tile_offset
     u32 global_linear = 0;

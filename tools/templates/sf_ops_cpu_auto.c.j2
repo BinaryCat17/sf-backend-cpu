@@ -24,11 +24,12 @@ void op_{{ node.opcode }}(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     {% if node.inputs|length >= 3 %}u8* c_ptr = (u8*)ctx->reg_ptrs[inst->src3_idx];{% endif %}
     {% if node.inputs|length >= 4 %}u8* d_in_ptr = (u8*)ctx->reg_ptrs[inst->src4_idx];{% endif %}
     
-    const i32 st0 = ctx->reg_strides[inst->dest_idx][ctx->ndim-1];
-    const i32 st1 = ctx->reg_strides[inst->src1_idx][ctx->ndim-1];
-    {% if node.inputs|length >= 2 %}const i32 st2 = ctx->reg_strides[inst->src2_idx][ctx->ndim-1];{% endif %}
-    {% if node.inputs|length >= 3 %}const i32 st3 = ctx->reg_strides[inst->src3_idx][ctx->ndim-1];{% endif %}
-    {% if node.inputs|length >= 4 %}const i32 st4 = ctx->reg_strides[inst->src4_idx][ctx->ndim-1];{% endif %}
+    const int last_dim = (ctx->ndim > 0) ? (int)ctx->ndim - 1 : 0;
+    const i32 st0 = ctx->reg_strides[inst->dest_idx][last_dim];
+    const i32 st1 = ctx->reg_strides[inst->src1_idx][last_dim];
+    {% if node.inputs|length >= 2 %}const i32 st2 = ctx->reg_strides[inst->src2_idx][last_dim];{% endif %}
+    {% if node.inputs|length >= 3 %}const i32 st3 = ctx->reg_strides[inst->src3_idx][last_dim];{% endif %}
+    {% if node.inputs|length >= 4 %}const i32 st4 = ctx->reg_strides[inst->src4_idx][last_dim];{% endif %}
 
     // Dimension Helpers
     const int32_t s1_last_dim = (ctx->reg_info[inst->src1_idx].ndim > 0) ? ctx->reg_info[inst->src1_idx].shape[ctx->reg_info[inst->src1_idx].ndim - 1] : 1;
