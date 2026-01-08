@@ -79,10 +79,11 @@ void op_SUM_STABLE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
 }
 
 void op_SIZE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
-    const sf_type_info* src_info = &ctx->reg_info[inst->src1_idx];
+    uint8_t ndim = ctx->reg_ndims[inst->src1_idx];
+    const int32_t* shape = ctx->reg_shapes[inst->src1_idx];
     size_t count = 1;
-    for (int i = 0; i < src_info->ndim; ++i) {
-        count *= (src_info->shape[i] > 0 ? (size_t)src_info->shape[i] : 1);
+    for (int i = 0; i < ndim; ++i) {
+        count *= (shape[i] > 0 ? (size_t)shape[i] : 1);
     }
     
     f32* d_ptr = (f32*)ctx->reg_ptrs[inst->dest_idx];

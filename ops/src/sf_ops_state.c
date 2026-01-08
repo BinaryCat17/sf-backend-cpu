@@ -5,33 +5,6 @@
 #include "sf_ops_internal.h"
 #include <string.h>
 
-void op_COPY(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
-    const sf_type_info* info = &ctx->reg_info[inst->src1_idx];
-    size_t sz = ctx->batch_size;
-    size_t esize = sf_dtype_size(info->dtype);
-    
-    u8* s_ptr = (u8*)ctx->reg_ptrs[inst->src1_idx];
-    u8* d_ptr = (u8*)ctx->reg_ptrs[inst->dest_idx];
-
-    i32 st0 = SF_GET_STRIDE_D(inst);
-    i32 st1 = SF_GET_STRIDE_S1(inst);
-
-    if (st0 == (i32)esize && st1 == (i32)esize) {
-        memcpy(d_ptr, s_ptr, sz * esize);
-        return;
-    }
-
-    for(size_t i=0; i<sz; ++i) {
-        memcpy(d_ptr, s_ptr, esize);
-        s_ptr += st1;
-        d_ptr += st0;
-    }
-}
-
-void op_SLICE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
-    op_COPY(ctx, inst);
-}
-
-void op_RESHAPE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
-    op_COPY(ctx, inst);
-}
+// All data movement operations (COPY, SLICE, RESHAPE) have been removed 
+// from the execution backend. They are now handled as Zero-Copy views 
+// by the Engine and Compiler.

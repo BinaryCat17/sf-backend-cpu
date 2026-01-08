@@ -39,20 +39,20 @@ static void sf_generate_index_chunk(void* out_raw, sf_dtype dtype, u32 count, u3
 
 void op_INDEX_X(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     u16 r_out = inst->dest_idx;
-    sf_generate_index_chunk(ctx->reg_ptrs[r_out], ctx->reg_info[r_out].dtype, ctx->batch_size, ctx->linear_offset, 0, false, ctx->ndim, ctx->domain_shape);
+    sf_generate_index_chunk(ctx->reg_ptrs[r_out], (sf_dtype)ctx->reg_dtypes[r_out], ctx->batch_size, ctx->linear_offset, 0, false, ctx->ndim, ctx->domain_shape);
 }
 
 void op_INDEX_Y(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     u16 r_out = inst->dest_idx;
-    sf_generate_index_chunk(ctx->reg_ptrs[r_out], ctx->reg_info[r_out].dtype, ctx->batch_size, ctx->linear_offset, 1, false, ctx->ndim, ctx->domain_shape);
+    sf_generate_index_chunk(ctx->reg_ptrs[r_out], (sf_dtype)ctx->reg_dtypes[r_out], ctx->batch_size, ctx->linear_offset, 1, false, ctx->ndim, ctx->domain_shape);
 }
 
 void op_INDEX_Z(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     u16 r_out = inst->dest_idx;
-    sf_generate_index_chunk(ctx->reg_ptrs[r_out], ctx->reg_info[r_out].dtype, ctx->batch_size, ctx->linear_offset, 2, false, ctx->ndim, ctx->domain_shape);
+    sf_generate_index_chunk(ctx->reg_ptrs[r_out], (sf_dtype)ctx->reg_dtypes[r_out], ctx->batch_size, ctx->linear_offset, 2, false, ctx->ndim, ctx->domain_shape);
 }
 
 void op_RANGE(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     u16 r_out = inst->dest_idx;
-    sf_generate_index_chunk(ctx->reg_ptrs[r_out], ctx->reg_info[r_out].dtype, ctx->batch_size, ctx->linear_offset, 0, false, ctx->ndim, ctx->domain_shape);
+    sf_generate_index_chunk(ctx->reg_ptrs[r_out], (sf_dtype)ctx->reg_dtypes[r_out], ctx->batch_size, ctx->linear_offset, 0, false, ctx->ndim, ctx->domain_shape);
 }

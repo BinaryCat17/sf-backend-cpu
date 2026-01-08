@@ -10,11 +10,11 @@
 
 // --- Stride Inference ---
 
-#define SF_GET_STRIDE_D(inst)  (ctx->reg_strides[(inst)->dest_idx][ctx->ndim-1])
-#define SF_GET_STRIDE_S1(inst) (ctx->reg_strides[(inst)->src1_idx][ctx->ndim-1])
-#define SF_GET_STRIDE_S2(inst) (ctx->reg_strides[(inst)->src2_idx][ctx->ndim-1])
-#define SF_GET_STRIDE_S3(inst) (ctx->reg_strides[(inst)->src3_idx][ctx->ndim-1])
-#define SF_GET_STRIDE_S4(inst) (ctx->reg_strides[(inst)->src4_idx][ctx->ndim-1])
+#define SF_GET_STRIDE_D(inst)  (ctx->reg_strides[(inst)->dest_idx][(ctx->ndim > 0) ? ctx->ndim - 1 : 0])
+#define SF_GET_STRIDE_S1(inst) (ctx->reg_strides[(inst)->src1_idx][(ctx->ndim > 0) ? ctx->ndim - 1 : 0])
+#define SF_GET_STRIDE_S2(inst) (ctx->reg_strides[(inst)->src2_idx][(ctx->ndim > 0) ? ctx->ndim - 1 : 0])
+#define SF_GET_STRIDE_S3(inst) (ctx->reg_strides[(inst)->src3_idx][(ctx->ndim > 0) ? ctx->ndim - 1 : 0])
+#define SF_GET_STRIDE_S4(inst) (ctx->reg_strides[(inst)->src4_idx][(ctx->ndim > 0) ? ctx->ndim - 1 : 0])
 
 // --- Macros: Optimized Kernel Definitions ---
 

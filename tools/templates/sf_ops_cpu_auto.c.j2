@@ -13,6 +13,13 @@
  * Automatically generated from isa.json and cpu_spec.json. DO NOT EDIT.
  */
 
+static inline f32 sf_read_value(const void* ptr, sf_dtype dtype) {
+    if (dtype == SF_DTYPE_F32) return *(const f32*)ptr;
+    if (dtype == SF_DTYPE_I32) return (f32)*(const int32_t*)ptr;
+    if (dtype == SF_DTYPE_U8)  return (f32)*(const uint8_t*)ptr;
+    return 0.0f;
+}
+
 {% for node_id, impl in implementations.items() %}
 {% set node = nodes_by_id[node_id] %}
 {% if node and (impl.expression or impl.template) %}
@@ -31,8 +38,14 @@ void op_{{ node.opcode }}(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
     {% if node.inputs|length >= 3 %}const i32 st3 = ctx->reg_strides[inst->src3_idx][last_dim];{% endif %}
     {% if node.inputs|length >= 4 %}const i32 st4 = ctx->reg_strides[inst->src4_idx][last_dim];{% endif %}
 
+    const sf_dtype dt_a = (sf_dtype)ctx->reg_dtypes[inst->src1_idx];
+    {% if node.inputs|length >= 2 %}const sf_dtype dt_b = (sf_dtype)ctx->reg_dtypes[inst->src2_idx];{% endif %}
+    {% if node.inputs|length >= 3 %}const sf_dtype dt_c = (sf_dtype)ctx->reg_dtypes[inst->src3_idx];{% endif %}
+    {% if node.inputs|length >= 4 %}const sf_dtype dt_d = (sf_dtype)ctx->reg_dtypes[inst->src4_idx];{% endif %}
+
     // Dimension Helpers
-    const int32_t s1_last_dim = (ctx->reg_info[inst->src1_idx].ndim > 0) ? ctx->reg_info[inst->src1_idx].shape[ctx->reg_info[inst->src1_idx].ndim - 1] : 1;
+    const uint8_t s1_ndim = ctx->reg_ndims[inst->src1_idx];
+    const int32_t s1_last_dim = (s1_ndim > 0) ? ctx->reg_shapes[inst->src1_idx][s1_ndim - 1] : 1;
     (void)s1_last_dim;
 
     {% if impl.template %}
@@ -49,39 +62,13 @@ void op_{{ node.opcode }}(sf_exec_ctx* ctx, const struct sf_instruction* inst) {
         {% set expr = impl.expression %}
     {% endif %}
 
-    // Fast Path: All strides are standard (sizeof(f32))
-    if (st0 == 4 && st1 == 4 {% if node.inputs|length >= 2 %}&& st2 == 4{% endif %} {% if node.inputs|length >= 3 %}&& st3 == 4{% endif %} {% if node.inputs|length >= 4 %}&& st4 == 4{% endif %}) {
-        f32* d = (f32*)d_ptr;
-        f32* a = (f32*)a_ptr;
-        {% if node.inputs|length >= 2 %}f32* b = (f32*)b_ptr;{% endif %}
-        {% if node.inputs|length >= 3 %}f32* c = (f32*)c_ptr;{% endif %}
-        {% if node.inputs|length >= 4 %}f32* din = (f32*)d_in_ptr;{% endif %}
-        for(size_t i=0; i<sz; ++i) {
-            const f32 va = a[i];
-            {% if node.inputs|length >= 2 %}const f32 vb = b[i];{% endif %}
-            {% if node.inputs|length >= 3 %}const f32 vc = c[i];{% endif %}
-            {% if node.inputs|length >= 4 %}const f32 vd = din[i];{% endif %}
-            
-            // Pointers for DSL macros
-            const void* va_ptr = &a[i];
-            {% if node.inputs|length >= 2 %}const void* vb_ptr = &b[i];{% endif %}
-            {% if node.inputs|length >= 3 %}const void* vc_ptr = &c[i];{% endif %}
-            {% if node.inputs|length >= 4 %}const void* vd_ptr = &din[i];{% endif %}
-            (void)va_ptr; {% if node.inputs|length >= 2 %}(void)vb_ptr;{% endif %} {% if node.inputs|length >= 3 %}(void)vc_ptr;{% endif %} {% if node.inputs|length >= 4 %}(void)vd_ptr;{% endif %}
-
-            const f32 result = (f32)({{ expr }});
-            d[i] = isfinite(result) ? result : 0.0f;
-        }
-        return;
-    }
-
     for(size_t i=0; i<sz; ++i) {
-        const f32 va = *(f32*)a_ptr;
-        {% if node.inputs|length >= 2 %}const f32 vb = *(f32*)b_ptr;{% endif %}
-        {% if node.inputs|length >= 3 %}const f32 vc = *(f32*)c_ptr;{% endif %}
-        {% if node.inputs|length >= 4 %}const f32 vd = *(f32*)d_in_ptr;{% endif %}
+        const f32 va = sf_read_value(a_ptr, dt_a);
+        {% if node.inputs|length >= 2 %}const f32 vb = sf_read_value(b_ptr, dt_b);{% endif %}
+        {% if node.inputs|length >= 3 %}const f32 vc = sf_read_value(c_ptr, dt_c);{% endif %}
+        {% if node.inputs|length >= 4 %}const f32 vd = sf_read_value(d_in_ptr, dt_d);{% endif %}
         
-        // Pointers for DSL macros
+        // Pointers for DSL macros (Note: These may still be unsafe if DSL expects f32*)
         const void* va_ptr = a_ptr;
         {% if node.inputs|length >= 2 %}const void* vb_ptr = b_ptr;{% endif %}
         {% if node.inputs|length >= 3 %}const void* vc_ptr = c_ptr;{% endif %}

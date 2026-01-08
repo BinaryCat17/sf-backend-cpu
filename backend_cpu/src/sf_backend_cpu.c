@@ -120,14 +120,16 @@ static void format_tensor_debug(char* buf, const sf_exec_ctx* ctx, int reg_idx, 
     }
     
     const char* name = find_reg_name(prog, reg_idx);
-    const sf_type_info* info = &ctx->reg_info[reg_idx];
+    uint8_t ndim = ctx->reg_ndims[reg_idx];
+    uint8_t dtype = ctx->reg_dtypes[reg_idx];
+    const int32_t* shape = ctx->reg_shapes[reg_idx];
     void* data = ctx->reg_ptrs[reg_idx];
 
     char shape_str[64] = {0};
     int pos = 0;
-    if (info->ndim == 0) strcpy(shape_str, "Scalar");
+    if (ndim == 0) strcpy(shape_str, "Scalar");
     else {
-        for (int i = 0; i < info->ndim; ++i) pos += sprintf(shape_str + pos, "%d%s", info->shape[i], (i < info->ndim - 1) ? "," : "");
+        for (int i = 0; i < ndim; ++i) pos += sprintf(shape_str + pos, "%d%s", shape[i], (i < ndim - 1) ? "," : "");
     }
 
     char tag[128];
@@ -135,18 +137,18 @@ static void format_tensor_debug(char* buf, const sf_exec_ctx* ctx, int reg_idx, 
     else sprintf(tag, "Reg %-2d (%s)", reg_idx, name);
 
     if (!data) {
-        sprintf(buf, "%-30s : <NULL PTR> [%s] Shape: [%s]", tag, _dtype_to_str(info->dtype), shape_str);
+        sprintf(buf, "%-30s : <NULL PTR> [%s] Shape: [%s]", tag, _dtype_to_str(dtype), shape_str);
         return;
     }
 
-    if (info->ndim == 0 || (info->ndim == 1 && info->shape[0] == 1)) {
+    if (ndim == 0 || (ndim == 1 && shape[0] == 1)) {
         float val = 0;
-        if (info->dtype == SF_DTYPE_F32) val = *(f32*)data;
-        else if (info->dtype == SF_DTYPE_I32) val = (f32)*(int32_t*)data;
-        else if (info->dtype == SF_DTYPE_U8) val = (f32)*(u8*)data;
-        sprintf(buf, "%-30s : Value: %-10.3f (%s)", tag, val, _dtype_to_str(info->dtype));
+        if (dtype == SF_DTYPE_F32) val = *(f32*)data;
+        else if (dtype == SF_DTYPE_I32) val = (f32)*(int32_t*)data;
+        else if (dtype == SF_DTYPE_U8) val = (f32)*(u8*)data;
+        sprintf(buf, "%-30s : Value: %-10.3f (%s)", tag, val, _dtype_to_str(dtype));
     } else {
-        sprintf(buf, "%-30s : Tensor[%-10s] (%s) Ptr: %p", tag, shape_str, _dtype_to_str(info->dtype), data);
+        sprintf(buf, "%-30s : Tensor[%-10s] (%s) Ptr: %p", tag, shape_str, _dtype_to_str(dtype), data);
     }
 }
 
@@ -204,11 +206,12 @@ static void prepare_registers(sf_backend_cpu_worker_state* state, const sf_cpu_p
         const sf_bin_task_binding* bind = &prog->bindings[task->binding_offset + b];
         u16 i = bind->reg_idx;
         
-        sf_tensor* t = &batch->main_state->registers[i];
-        ctx->reg_info[i] = t->info;
+        ctx->reg_ndims[i] = batch->main_state->reg_ndims[i];
+        ctx->reg_dtypes[i] = batch->main_state->reg_dtypes[i];
+        memcpy(ctx->reg_shapes[i], &batch->main_state->reg_shapes[i * SF_MAX_DIMS], sizeof(int32_t) * SF_MAX_DIMS);
         
-        // Copy N-D Strides
-        memcpy(ctx->reg_strides[i], &batch->main_state->task_strides[i * SF_MAX_DIMS], sizeof(int32_t) * SF_MAX_DIMS);
+        // Load pre-calculated N-D Strides and Offset from binding
+        memcpy(ctx->reg_strides[i], bind->strides, sizeof(int32_t) * SF_MAX_DIMS);
 
         if (batch->reduction_scratch && (bind->flags & SF_BINDING_FLAG_REDUCTION)) {
             ctx->reg_ptrs[i] = &batch->reduction_scratch[tid * batch->reduction_scratch_per_thread + i];
@@ -217,8 +220,9 @@ static void prepare_registers(sf_backend_cpu_worker_state* state, const sf_cpu_p
         }
 
         // Buffer-based (Symbol, Constant, or Scratch)
-        if (t->buffer && t->buffer->data) {
-            u8* ptr = (u8*)t->buffer->data + t->byte_offset;
+        void* base_ptr = batch->main_state->reg_data[i];
+        if (base_ptr) {
+            u8* ptr = (u8*)base_ptr + bind->offset;
             // Apply N-D tile offset
             for (int d = 0; d < ctx->ndim; ++d) {
                 ptr += (size_t)ctx->tile_offset[d] * ctx->reg_strides[i][d];
@@ -227,7 +231,7 @@ static void prepare_registers(sf_backend_cpu_worker_state* state, const sf_cpu_p
         } else {
             ctx->reg_ptrs[i] = NULL;
             if (ctx->error == SF_ERROR_NONE) {
-                SF_LOG_ERROR("Backend: Reg %u (%s) has NULL buffer data", i, find_reg_name(prog, i));
+                SF_LOG_ERROR("Backend: Reg %u (%s) has NULL data pointer", i, find_reg_name(prog, i));
                 ctx->error = SF_ERROR_RUNTIME;
             }
         }
@@ -238,13 +242,13 @@ static void cpu_worker_job(u32 job_idx, void* thread_local_data, void* user_data
     sf_backend_cpu_worker_state* state = (sf_backend_cpu_worker_state*)thread_local_data;
     sf_cpu_parallel_batch* batch = (sf_cpu_parallel_batch*)user_data;
     
-    const sf_grid* grid = &batch->main_state->grid;
+    const sf_grid* grid = &batch->current_task->grid;
     if (job_idx >= grid->total_tiles) return;
 
     sf_arena_reset(&state->temp_arena);
     sf_exec_ctx_init(&state->ctx, (sf_allocator*)&state->temp_arena);
     
-    state->ctx.ndim = (u8)batch->main_state->registers[batch->current_task->domain_reg].info.ndim; 
+    state->ctx.ndim = (u8)batch->main_state->reg_ndims[batch->current_task->domain_reg]; 
     state->ctx.grid = *grid;
     if (batch->main_state) state->ctx.global_error_ptr = batch->main_state->global_error_ptr ? batch->main_state->global_error_ptr : &batch->main_state->error_code;
     state->ctx.job_idx = job_idx;
@@ -260,7 +264,7 @@ static void cpu_worker_job(u32 job_idx, void* thread_local_data, void* user_data
     state->ctx.tile_offset[state->ctx.ndim - 1] = 0; // We always start at col 0 of the row
     
     for(int d=0; d<SF_MAX_DIMS; ++d) {
-        state->ctx.domain_shape[d] = (d < state->ctx.ndim) ? batch->main_state->registers[batch->current_task->domain_reg].info.shape[d] : 1;
+        state->ctx.domain_shape[d] = (d < state->ctx.ndim) ? batch->main_state->reg_shapes[batch->current_task->domain_reg * SF_MAX_DIMS + d] : 1;
         state->ctx.tile_size[d] = (d < state->ctx.ndim) ? grid->tile_shape[d] : 1;
     }
     
@@ -286,7 +290,7 @@ static void cpu_worker_job(u32 job_idx, void* thread_local_data, void* user_data
 static void sf_backend_cpu_dispatch_batch(sf_backend_cpu_state* state, sf_cpu_parallel_batch* batch, const sf_task* task) {
     if (task->inst_count == 0) return;
     batch->current_task = task;
-    u32 total_jobs = batch->main_state->grid.total_tiles;
+    u32 total_jobs = task->grid.total_tiles;
     
     if (total_jobs == 1) {
         sf_backend_cpu_worker_state local_worker;
@@ -348,7 +352,7 @@ static void sf_backend_cpu_dispatch(void* backend_state, const struct sf_program
     }
 
     if (task->strategy == SF_STRATEGY_TWO_PASS_SYNC) {
-        u32 total_jobs = main_state->grid.total_tiles;
+        u32 total_jobs = task->grid.total_tiles;
         f32* sync_ptr = baked->sync_scratch;
         if (total_jobs > baked->sync_scratch_size) sync_ptr = calloc(total_jobs, sizeof(f32));
         batch.sync_pass = 0; batch.sync_data = sync_ptr;
@@ -367,9 +371,9 @@ static void sf_backend_cpu_dispatch(void* backend_state, const struct sf_program
             if (program->tensor_flags[i] & SF_TENSOR_FLAG_REDUCTION) {
                 f32 final_val = 0;
                 for (int t = 0; t < num_threads; ++t) final_val += batch.reduction_scratch[t * batch.reduction_scratch_per_thread + i];
-                sf_tensor* main_t = &main_state->registers[i];
-                if (main_t->buffer && main_t->buffer->data) {
-                    *((f32*)main_t->buffer->data + main_t->byte_offset / sizeof(f32)) = final_val;
+                void* dst_ptr = main_state->reg_data[i];
+                if (dst_ptr) {
+                    *((f32*)dst_ptr) = final_val;
                 }
             }
         }
